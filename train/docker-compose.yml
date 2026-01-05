@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  vint-text-train:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vint-text-train:latest
+    container_name: vint-text-train
+
+    # GPU support (RTX 2060 6GB)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    # Interactive mode
+    stdin_open: true
+    tty: true
+
+    # Volume mounts - all on external HDD
+    volumes:
+      # Mount the training code
+      - /media/mohamad/Transcend/Skoltech-PhD/visualnav-transformer/train:/workspace/train
+      # Mount egowalk-dataset library
+      - /media/mohamad/Transcend/Skoltech-PhD/egowalk-dataset:/workspace/egowalk-dataset
+      # Mount EgoWalk data
+      - /media/mohamad/Transcend/Skoltech-PhD/egowalk-dataset/hf_data_dir:/workspace/data
+      # Cache directory for HuggingFace models (on external HDD)
+      - /media/mohamad/Transcend/Skoltech-PhD/visualnav-transformer/train/cache:/workspace/cache
+      # Logs directory
+      - /media/mohamad/Transcend/Skoltech-PhD/visualnav-transformer/train/logs:/workspace/train/logs
+      # W&B config to persist login credentials
+      - /media/mohamad/Transcend/Skoltech-PhD/visualnav-transformer/train/wandb_config:/root/.config/wandb
+
+    # Environment variables
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HF_EGOWALK_HOME=/workspace/data
+      - HF_HOME=/workspace/cache/huggingface
+      - TRANSFORMERS_CACHE=/workspace/cache/transformers
+      - PYTHONPATH=/workspace/train:/workspace/egowalk-dataset
+      # WANDB_API_KEY will be set via 'wandb login' inside container
+
+    # Working directory
+    working_dir: /workspace/train
+
+    # Network mode
+    network_mode: host
+
+    # Shared memory (4GB for DataLoader - half of your 16GB RAM is safe)
+    shm_size: '4gb'
