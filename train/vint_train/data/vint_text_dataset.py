@@ -28,29 +28,32 @@ from egowalk_dataset.datasets.gnm.gnm_dataset import (
     GNMCaptionFeature,
     GNMWaypointFeature,
 )
+from egowalk_dataset.datasets.gnm.cutters import (
+    SpikesCutter,
+    StuckCutter,
+    BackwardCutter,
+)
 
 
-def create_vint_image_transform(
-    image_size: Tuple[int, int] = (85, 64),
-    normalize: bool = True,
-) -> Callable:
+class ViNTImageTransform:
     """
-    Create image transform for ViNT format.
+    Image transform for ViNT format that can be pickled for multiprocessing.
 
     Args:
         image_size: Target size (width, height)
         normalize: Whether to normalize to [0, 1]
-
-    Returns:
-        Transform function
     """
-    def transform(img: np.ndarray) -> torch.Tensor:
+    def __init__(self, image_size: Tuple[int, int] = (85, 64), normalize: bool = True):
+        self.image_size = image_size
+        self.normalize = normalize
+
+    def __call__(self, img: np.ndarray) -> torch.Tensor:
         # img is [H, W, 3] numpy array from egowalk-dataset
         # Convert to PIL for resizing
         pil_img = Image.fromarray(img)
 
         # Resize to ViNT size (width, height)
-        pil_img = pil_img.resize(image_size, Image.BILINEAR)
+        pil_img = pil_img.resize(self.image_size, Image.BILINEAR)
 
         # Convert to numpy and then tensor
         img_array = np.array(pil_img)
@@ -59,12 +62,10 @@ def create_vint_image_transform(
         img_tensor = torch.from_numpy(img_array).permute(2, 0, 1).float()
 
         # Normalize to [0, 1]
-        if normalize:
+        if self.normalize:
             img_tensor = img_tensor / 255.0
 
         return img_tensor
-
-    return transform
 
 
 class ViNT_Text_Dataset(Dataset):
@@ -101,6 +102,8 @@ class ViNT_Text_Dataset(Dataset):
         context_step: int = 1,
         action_step: int = 1,
         data_path: Optional[str] = None,
+        annotations_path: Optional[str] = None,
+        annotations_subset: str = "end2end",
         n_workers: int = 0,
     ):
         super().__init__()
@@ -119,20 +122,38 @@ class ViNT_Text_Dataset(Dataset):
             )
         self.data_path = os.path.join(data_path, "EgoWalk", "trajectories")
 
-        # Create image transform
-        self.image_transform = create_vint_image_transform(image_size, normalize)
+        # Create image transform (picklable class for multiprocessing)
+        self.image_transform = ViNTImageTransform(image_size, normalize)
 
         # Create index using egowalk library
         # Note: context_length in egowalk includes the current frame,
         # but ViNT's context_size is previous frames only
-        # So we use context_length = context_size (egowalk will give us context_size+1 frames)
+        # So we use context_length = context_size (egowalk will give us context_size+1 frames total
+
+        # Create cutters for trajectory segmentation
+        cutters = [
+            SpikesCutter(spike_threshold=2.0),
+            BackwardCutter(backwards_eps=1e-2, stuck_eps=1e-2, ignore_stuck=True),
+            SpikesCutter(spike_threshold=2.0),
+        ]
+
+        # Annotations path - can be custom or default
+        if annotations_path is None:
+            # Default: annotations inside data directory
+            annotations_path = os.path.join(self.data_path, "annotations")
+
+        print(f"Data path: {self.data_path}")
+        print(f"Annotations path: {annotations_path}")
+
         print(f"Indexing trajectories for text goals...")
         self.gnm_index = index_gnm_text(
+            cutters=cutters,
+            annotations_path=annotations_path,
+            annotations_subset=annotations_subset,
+            caption_type=caption_type,
             context_length=context_size,  # This gives us context_size+1 frames total
             action_length=len_traj_pred,
-            caption_type=caption_type,
             window_step=window_step,
-            n_window_steps=n_window_steps,
             context_step=context_step,
             action_step=action_step,
             data_path=self.data_path,

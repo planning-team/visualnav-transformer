@@ -26,11 +26,7 @@ from vint_train.models.vint.vit import ViT
 from vint_train.models.vint.vint_text import ViNT_Text
 from vint_train.models.nomad.nomad import NoMaD, DenseNetwork
 from vint_train.models.nomad.nomad_vint import NoMaD_ViNT, replace_bn_with_gn
-# Conditional import for NoMaD model
-try:
-    from diffusion_policy.model.diffusion.conditional_unet1d import ConditionalUnet1D
-except ImportError:
-    ConditionalUnet1D = None  # Will raise error if NoMaD is used without diffusion_policy
+from diffusion_policy.model.diffusion.conditional_unet1d import ConditionalUnet1D
 
 
 from vint_train.data.vint_dataset import ViNT_Dataset
@@ -84,32 +80,88 @@ def main_text(config):
     # Set environment variable
     os.environ["HF_EGOWALK_HOME"] = egowalk_config["data_path"]
 
-    print("Creating EgoWalk text dataset...")
-    full_dataset = ViNT_Text_Dataset(
-        trajectories=egowalk_config.get("trajectories"),
-        context_size=config["context_size"],
-        len_traj_pred=config["len_traj_pred"],
-        image_size=tuple(config["image_size"]),
-        normalize=True,
-        caption_type=egowalk_config.get("caption_type", "normal"),
-        window_step=egowalk_config.get("window_step", 2),
-        n_window_steps=egowalk_config.get("n_window_steps", 4),
-        context_step=egowalk_config.get("context_step", 1),
-        action_step=egowalk_config.get("action_step", 1),
-        data_path=egowalk_config["data_path"],
-        n_workers=egowalk_config.get("n_index_workers", 0),
-    )
+    # Check if using trajectory split file
+    trajectory_split_file = egowalk_config.get("trajectory_split_file")
 
-    # Split into train/test
-    train_fraction = config.get("train_fraction", 0.8)
-    total_size = len(full_dataset)
-    train_size = int(total_size * train_fraction)
-    test_size = total_size - train_size
+    if trajectory_split_file:
+        # Load pre-defined train/test split from file
+        print(f"Loading trajectory split from {trajectory_split_file}...")
+        with open(trajectory_split_file, 'r') as f:
+            split_data = yaml.safe_load(f)
 
-    train_dataset, test_dataset = torch.utils.data.random_split(
-        full_dataset, [train_size, test_size]
-    )
-    print(f"Train size: {train_size}, Test size: {test_size}")
+        train_trajectories = split_data['train']
+        test_trajectories = split_data['test']
+
+        print(f"Train trajectories: {len(train_trajectories)}")
+        print(f"Test trajectories: {len(test_trajectories)}")
+
+        # Create separate datasets
+        print("Creating train dataset...")
+        train_dataset = ViNT_Text_Dataset(
+            trajectories=train_trajectories,
+            context_size=config["context_size"],
+            len_traj_pred=config["len_traj_pred"],
+            image_size=tuple(config["image_size"]),
+            normalize=True,
+            caption_type=egowalk_config.get("caption_type", "caption"),
+            window_step=egowalk_config.get("window_step", 2),
+            context_step=egowalk_config.get("context_step", 1),
+            action_step=egowalk_config.get("action_step", 1),
+            data_path=egowalk_config["data_path"],
+            annotations_path=egowalk_config.get("annotations_path"),
+            annotations_subset=egowalk_config.get("annotations_subset", "end2end"),
+            n_workers=egowalk_config.get("n_index_workers", 0),
+        )
+
+        print("Creating test dataset...")
+        test_dataset = ViNT_Text_Dataset(
+            trajectories=test_trajectories,
+            context_size=config["context_size"],
+            len_traj_pred=config["len_traj_pred"],
+            image_size=tuple(config["image_size"]),
+            normalize=True,
+            caption_type=egowalk_config.get("caption_type", "caption"),
+            window_step=egowalk_config.get("window_step", 2),
+            context_step=egowalk_config.get("context_step", 1),
+            action_step=egowalk_config.get("action_step", 1),
+            data_path=egowalk_config["data_path"],
+            annotations_path=egowalk_config.get("annotations_path"),
+            annotations_subset=egowalk_config.get("annotations_subset", "end2end"),
+            n_workers=egowalk_config.get("n_index_workers", 0),
+        )
+
+        print(f"Train size: {len(train_dataset)}, Test size: {len(test_dataset)}")
+
+    else:
+        # Use old approach: single dataset with random split
+        print("Creating EgoWalk text dataset...")
+        full_dataset = ViNT_Text_Dataset(
+            trajectories=egowalk_config.get("trajectories"),
+            context_size=config["context_size"],
+            len_traj_pred=config["len_traj_pred"],
+            image_size=tuple(config["image_size"]),
+            normalize=True,
+            caption_type=egowalk_config.get("caption_type", "caption"),
+            window_step=egowalk_config.get("window_step", 2),
+            context_step=egowalk_config.get("context_step", 1),
+            action_step=egowalk_config.get("action_step", 1),
+            data_path=egowalk_config["data_path"],
+            annotations_path=egowalk_config.get("annotations_path"),
+            annotations_subset=egowalk_config.get("annotations_subset", "end2end"),
+            n_workers=egowalk_config.get("n_index_workers", 0),
+        )
+
+        # Split into train/test
+        train_fraction = config.get("train_fraction", 0.8)
+        total_size = len(full_dataset)
+        train_size = int(total_size * train_fraction)
+        test_size = total_size - train_size
+
+        train_dataset, test_dataset = torch.utils.data.random_split(
+            full_dataset, [train_size, test_size],
+            generator=torch.Generator().manual_seed(config.get("seed", 0))
+        )
+        print(f"Train size: {train_size}, Test size: {test_size}")
 
     # Create data loaders with custom collate for text
     train_loader = ViNT_Text_DataLoader(

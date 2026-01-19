@@ -1,27 +1,32 @@
-project_name: egowalk_vint_text  # My W&B project name
-run_name: vint-text-siglip2
+# ViNT Text Training Config - NABO SERVER (A100 80GB)
+# Use this config for full training on high-resource machines
+# Run: python train.py --config config/vint_text.yaml
+# For local laptop, use: python train.py --config config/vint_text_local.yaml
 
-# training setup
+project_name: egowalk_vint_text
+run_name: vint-text
+
+# Training setup - FULL training
 use_wandb: True
 train: True
-batch_size: 4  # Small batch for RTX 2060 6GB VRAM
-eval_batch_size: 4
-epochs: 50
+batch_size: 32  # Large batch for A100 80GB VRAM
+eval_batch_size: 32
+epochs: 100
 gpu_ids: [0]
-num_workers: 0  # Single-threaded to avoid pickle error
-lr: 1e-4  # Lower LR for fine-tuning
+num_workers: 8  # More workers for faster data loading
+lr: 1e-4
 optimizer: adamw
 clipping: True
 max_norm: 1.0
 scheduler: "cosine"
 warmup: True
-warmup_epochs: 2
+warmup_epochs: 5
 seed: 0
 
-# Memory optimization
-gradient_accumulation_steps: 8  # Effective batch size = 4 * 8 = 32
+# No gradient accumulation needed with large batch
+gradient_accumulation_steps: 1
 
-# model params
+# Model params
 model_type: vint_text
 obs_encoder: "efficientnet-b0"
 obs_encoding_size: 512
@@ -29,61 +34,59 @@ mha_num_attention_heads: 4
 mha_num_attention_layers: 4
 mha_ff_dim_factor: 4
 
-# SigLIP2 text encoder config
+# SigLIP2 text encoder
 siglip_model_name: "google/siglip2-base-patch16-224"
-siglip_cache_dir: "/workspace/cache/siglip2"  # Docker path - stored on external HDD
-freeze_siglip: True  # Freeze SigLIP2 weights
+siglip_cache_dir: "/workspace/cache/siglip2"
+freeze_siglip: True
 
-# Pre-trained ViNT checkpoint (set to path of your trained ViNT model)
-# If empty, will train from scratch (not recommended)
-load_vint_checkpoint: ""  # e.g., "logs/vint-release/vint-5c/latest.pth"
-freeze_vint: True  # Freeze ViNT backbone (recommended for fine-tuning)
+# ViNT checkpoint (empty = train from scratch)
+load_vint_checkpoint: ""
+freeze_vint: True
 
-# normalization for the action space
+# Normalization
 normalize: True
 
-# context
+# Context
 context_type: temporal
 context_size: 5
 
-# action output params
+# Action output
 len_traj_pred: 5
 learn_angle: True
 
-# dataset specific parameters
-image_size: [85, 64]  # width, height
+# Dataset
+image_size: [85, 64]
 goal_type: "text"
 
-# EgoWalk text dataset config
+# EgoWalk text dataset - SERVER PATHS (CONTAINER PATHS)
 egowalk_text:
-  # Path to egowalk-dataset library (Docker path)
   egowalk_lib_path: "/workspace/egowalk-dataset"
-  # Path to EgoWalk data (Docker path - HF_EGOWALK_HOME)
+  # Data path: root directory containing EgoWalk/trajectories
   data_path: "/workspace/data"
-  # Caption type: "normal" (detailed) or "brief" (keywords)
-  caption_type: "normal"
-  # Trajectories to use (null for all available)
-  trajectories:
-    - "2024_08_15__19_55_49"
-    - "2024_12_10__20_17_45"
-  # Indexing parameters
-  window_step: 2
-  n_window_steps: 4
+  # Annotations path: separate mount for annotations
+  annotations_path: "/workspace/annotations"
+  annotations_subset: "end2end"
+  # Use brief captions (as in the example notebook)
+  caption_type: "brief"
+  # Trajectory split file for reproducible train/test split
+  # Generate with: python generate_trajectory_split.py --output config/trajectory_split.yaml
+  trajectory_split_file: "config/trajectory_split.yaml"
+  # Smaller window step = more samples
+  window_step: 1
   context_step: 1
   action_step: 1
-  # Number of workers for indexing
-  n_index_workers: 0  # Single-threaded to avoid pickle error
+  n_index_workers: 16  # More workers for A100 server
 
-# Train/test split (fraction of data for training)
-train_fraction: 0.8
+# Train/test split (90% train / 10% test)
+train_fraction: 0.9
 
-# logging
-print_log_freq: 50
-image_log_freq: 500
+# Logging
+print_log_freq: 100
+image_log_freq: 1000
 num_images_log: 4
-eval_fraction: 0.5
-wandb_log_freq: 10
+eval_fraction: 0.25
+wandb_log_freq: 50
 eval_freq: 1
 
-# wandb entity (your username)
+# W&B
 wandb_entity: "medfa"
