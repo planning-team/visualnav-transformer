@@ -5,9 +5,10 @@ This module provides a text encoder that uses SigLIP2 to encode text goals
 and project them to the same embedding space as ViNT's image goal encoder.
 """
 
+from typing import List, Optional, Union
+
 import torch
 import torch.nn as nn
-from typing import List, Optional, Union
 from transformers import AutoModel, AutoTokenizer
 
 
@@ -52,8 +53,19 @@ class SigLIP2TextEncoder(nn.Module):
         # For siglip2-base-patch16-224, this is 768
         self.siglip_embed_dim = self.siglip_model.config.text_config.hidden_size
 
-        # Projection layer: SigLIP2 dim -> ViNT goal encoding size
-        self.projection = nn.Linear(self.siglip_embed_dim, goal_encoding_size)
+        # MLP projection: SigLIP2 dim -> ViNT goal encoding size
+        # Design rationale:
+        # - hidden_dim = input_dim to avoid premature compression before non-linearity (standard practice in CLIP-like models)
+        # - LayerNorm stabilizes gradients when adapting frozen encoder to new space
+        # - GELU activation (standard in vision-language projectors like LLaVA)
+        # - Final layer compresses to goal encoding size
+        hidden_dim = self.siglip_embed_dim  # 768 - maintain full width through first transform
+        self.projection = nn.Sequential(
+            nn.Linear(self.siglip_embed_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, goal_encoding_size),
+        )
 
         # Freeze SigLIP2 weights if specified
         if freeze_siglip:
