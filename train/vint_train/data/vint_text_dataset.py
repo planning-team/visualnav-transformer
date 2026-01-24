@@ -10,14 +10,14 @@ Environment setup:
 
 import os
 import sys
-import yaml
-import torch
+from typing import Callable, List, Optional, Tuple, Union
+
 import numpy as np
-from typing import List, Optional, Tuple, Union, Callable
+import torch
+import torchvision.transforms.functional as TF
+import yaml
 from PIL import Image
 from torch.utils.data import Dataset
-import torchvision.transforms.functional as TF
-
 from vint_train.data.data_utils import IMAGE_ASPECT_RATIO
 
 # Add egowalk-dataset to path if EGOWALK_LIB_PATH is set
@@ -26,18 +26,14 @@ if _egowalk_lib_path and _egowalk_lib_path not in sys.path:
     sys.path.insert(0, _egowalk_lib_path)
 
 try:
+    from egowalk_dataset.datasets.gnm.cutters import (BackwardCutter,
+                                                      SpikesCutter,
+                                                      StuckCutter)
+    from egowalk_dataset.datasets.gnm.gnm_dataset import (GNMCaptionFeature,
+                                                          GNMDataset,
+                                                          GNMRGBFeature,
+                                                          GNMWaypointFeature)
     from egowalk_dataset.datasets.gnm.gnm_indexing import index_gnm_text
-    from egowalk_dataset.datasets.gnm.gnm_dataset import (
-        GNMDataset,
-        GNMRGBFeature,
-        GNMCaptionFeature,
-        GNMWaypointFeature,
-    )
-    from egowalk_dataset.datasets.gnm.cutters import (
-        SpikesCutter,
-        StuckCutter,
-        BackwardCutter,
-    )
 except ImportError as e:
     raise ImportError(
         f"egowalk-dataset library not found: {e}\n"
@@ -141,7 +137,7 @@ class ViNT_Text_Dataset(Dataset):
                     "data_path must be provided in config or set HF_EGOWALK_HOME env var.\n"
                     "Example: export HF_EGOWALK_HOME=/path/to/egowalk/data"
                 )
-        self.data_path = os.path.join(data_path, "EgoWalk", "trajectories")
+        self.data_path = data_path #os.path.join(data_path, "EgoWalk", "trajectories")
 
         # Create image transform (picklable class for multiprocessing)
         self.image_transform = ViNTImageTransform(image_size)
