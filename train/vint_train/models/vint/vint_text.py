@@ -35,6 +35,7 @@ class ViNT_Text(BaseModel):
         siglip_model_name: SigLIP2 model name from HuggingFace
         siglip_cache_dir: Directory to cache SigLIP2 weights
         freeze_siglip: Whether to freeze SigLIP2 weights
+        freeze_vint: Whether to freeze ViNT components (obs encoder, decoder, predictors)
     """
 
     def __init__(
@@ -50,6 +51,7 @@ class ViNT_Text(BaseModel):
         siglip_model_name: str = "google/siglip2-base-patch16-224",
         siglip_cache_dir: Optional[str] = None,
         freeze_siglip: bool = True,
+        freeze_vint: bool = False,
     ) -> None:
         super(ViNT_Text, self).__init__(context_size, len_traj_pred, learn_angle)
 
@@ -94,6 +96,10 @@ class ViNT_Text(BaseModel):
         self.action_predictor = nn.Sequential(
             nn.Linear(32, self.len_trajectory_pred * self.num_action_params),
         )
+
+        # Optionally freeze ViNT components (when training only text encoder)
+        if freeze_vint:
+            self.freeze_vint_components()
 
     def forward(
         self,
