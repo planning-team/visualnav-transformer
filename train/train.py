@@ -102,7 +102,7 @@ def main_text(config):
             context_size=config["context_size"],
             len_traj_pred=config["len_traj_pred"],
             image_size=tuple(config["image_size"]),
-            normalize=True,
+            normalize=config.get("normalize", True),
             caption_type=egowalk_config.get("caption_type", "caption"),
             window_step=egowalk_config.get("window_step", 2),
             context_step=egowalk_config.get("context_step", 1),
@@ -119,7 +119,7 @@ def main_text(config):
             context_size=config["context_size"],
             len_traj_pred=config["len_traj_pred"],
             image_size=tuple(config["image_size"]),
-            normalize=True,
+            normalize=config.get("normalize", True),
             caption_type=egowalk_config.get("caption_type", "caption"),
             window_step=egowalk_config.get("window_step", 2),
             context_step=egowalk_config.get("context_step", 1),
@@ -140,7 +140,7 @@ def main_text(config):
             context_size=config["context_size"],
             len_traj_pred=config["len_traj_pred"],
             image_size=tuple(config["image_size"]),
-            normalize=True,
+            normalize=config.get("normalize", True),
             caption_type=egowalk_config.get("caption_type", "caption"),
             window_step=egowalk_config.get("window_step", 2),
             context_step=egowalk_config.get("context_step", 1),
@@ -210,6 +210,7 @@ def main_text(config):
             siglip_model_name=config.get("siglip_model_name", "google/siglip2-base-patch16-224"),
             siglip_cache_dir=config.get("siglip_cache_dir"),
             freeze_siglip=config.get("freeze_siglip", True),
+            freeze_vint=config.get("freeze_vint", False),  # Default False when training from scratch
         )
 
     # Print trainable parameters

@@ -2,68 +2,82 @@
 ViNT Text Dataset: Dataset wrapper for training ViNT with text goals.
 
 Uses the egowalk-dataset library to load EgoWalk trajectories with text captions.
+
+Environment setup:
+    - EGOWALK_LIB_PATH: Path to egowalk-dataset library (or add to PYTHONPATH)
+    - HF_EGOWALK_HOME: Path to EgoWalk data (or pass data_path in config)
 """
 
 import os
 import sys
+import yaml
 import torch
 import numpy as np
 from typing import List, Optional, Tuple, Union, Callable
 from PIL import Image
 from torch.utils.data import Dataset
+import torchvision.transforms.functional as TF
 
-# Add egowalk-dataset to path
-EGOWALK_DATASET_PATH = "/media/mohamad/Transcend/Skoltech-PhD/egowalk-dataset"
-if EGOWALK_DATASET_PATH not in sys.path:
-    sys.path.insert(0, EGOWALK_DATASET_PATH)
+from vint_train.data.data_utils import IMAGE_ASPECT_RATIO
 
-# Set HF_EGOWALK_HOME environment variable if not set
-if "HF_EGOWALK_HOME" not in os.environ:
-    os.environ["HF_EGOWALK_HOME"] = "/media/mohamad/Transcend/Skoltech-PhD/egowalk-dataset/hf_data_dir"
+# Add egowalk-dataset to path if EGOWALK_LIB_PATH is set
+_egowalk_lib_path = os.environ.get("EGOWALK_LIB_PATH")
+if _egowalk_lib_path and _egowalk_lib_path not in sys.path:
+    sys.path.insert(0, _egowalk_lib_path)
 
-from egowalk_dataset.datasets.gnm.gnm_indexing import index_gnm_text
-from egowalk_dataset.datasets.gnm.gnm_dataset import (
-    GNMDataset,
-    GNMRGBFeature,
-    GNMCaptionFeature,
-    GNMWaypointFeature,
-)
-from egowalk_dataset.datasets.gnm.cutters import (
-    SpikesCutter,
-    StuckCutter,
-    BackwardCutter,
-)
+try:
+    from egowalk_dataset.datasets.gnm.gnm_indexing import index_gnm_text
+    from egowalk_dataset.datasets.gnm.gnm_dataset import (
+        GNMDataset,
+        GNMRGBFeature,
+        GNMCaptionFeature,
+        GNMWaypointFeature,
+    )
+    from egowalk_dataset.datasets.gnm.cutters import (
+        SpikesCutter,
+        StuckCutter,
+        BackwardCutter,
+    )
+except ImportError as e:
+    raise ImportError(
+        f"egowalk-dataset library not found: {e}\n"
+        "Please set EGOWALK_LIB_PATH env var or add egowalk-dataset to PYTHONPATH.\n"
+        "Example: export EGOWALK_LIB_PATH=/path/to/egowalk-dataset"
+    )
 
 
 class ViNTImageTransform:
     """
     Image transform for ViNT format that can be pickled for multiprocessing.
 
+    Matches original ViNT transform from data_utils.py:resize_and_aspect_crop
+    - Center crop to 4:3 aspect ratio
+    - Resize to target size
+    - Convert to tensor and normalize to [0, 1]
+
     Args:
         image_size: Target size (width, height)
-        normalize: Whether to normalize to [0, 1]
     """
-    def __init__(self, image_size: Tuple[int, int] = (85, 64), normalize: bool = True):
+    def __init__(self, image_size: Tuple[int, int] = (85, 64)):
         self.image_size = image_size
-        self.normalize = normalize
 
     def __call__(self, img: np.ndarray) -> torch.Tensor:
         # img is [H, W, 3] numpy array from egowalk-dataset
-        # Convert to PIL for resizing
+        # Convert to PIL for transforms
         pil_img = Image.fromarray(img)
+
+        # Center crop to 4:3 aspect ratio (same as original ViNT)
+        w, h = pil_img.size
+        if w > h:
+            pil_img = TF.center_crop(pil_img, (h, int(h * IMAGE_ASPECT_RATIO)))
+        else:
+            pil_img = TF.center_crop(pil_img, (int(w / IMAGE_ASPECT_RATIO), w))
 
         # Resize to ViNT size (width, height)
         pil_img = pil_img.resize(self.image_size, Image.BILINEAR)
 
-        # Convert to numpy and then tensor
-        img_array = np.array(pil_img)
-
-        # Convert to [C, H, W] format
-        img_tensor = torch.from_numpy(img_array).permute(2, 0, 1).float()
-
-        # Normalize to [0, 1]
-        if self.normalize:
-            img_tensor = img_tensor / 255.0
+        # Convert to tensor and normalize to [0, 1] (same as TF.to_tensor)
+        img_tensor = TF.to_tensor(pil_img)
 
         return img_tensor
 
@@ -79,7 +93,7 @@ class ViNT_Text_Dataset(Dataset):
         context_size: Number of context frames (excluding current)
         len_traj_pred: Number of waypoints to predict
         image_size: Target image size (width, height)
-        normalize: Whether to normalize images to [0, 1]
+        normalize: Whether to normalize images to [0, 1] and actions by metric_waypoint_spacing
         caption_type: Type of captions ("normal" or "brief")
         window_step: Step size for sliding window
         n_window_steps: Number of window steps per annotation
@@ -114,16 +128,23 @@ class ViNT_Text_Dataset(Dataset):
         self.normalize = normalize
         self.caption_type = caption_type
 
-        # Set data path
+        # Load data_config.yaml for metric_waypoint_spacing (same as original ViNT)
+        with open(os.path.join(os.path.dirname(__file__), "data_config.yaml"), "r") as f:
+            all_data_config = yaml.safe_load(f)
+        self.data_config = all_data_config["egowalk"]
+
+        # Set data path - from config or HF_EGOWALK_HOME env var
         if data_path is None:
-            data_path = os.environ.get(
-                "HF_EGOWALK_HOME",
-                "/media/mohamad/Transcend/Skoltech-PhD/egowalk-dataset/hf_data_dir"
-            )
+            data_path = os.environ.get("HF_EGOWALK_HOME")
+            if data_path is None:
+                raise ValueError(
+                    "data_path must be provided in config or set HF_EGOWALK_HOME env var.\n"
+                    "Example: export HF_EGOWALK_HOME=/path/to/egowalk/data"
+                )
         self.data_path = os.path.join(data_path, "EgoWalk", "trajectories")
 
         # Create image transform (picklable class for multiprocessing)
-        self.image_transform = ViNTImageTransform(image_size, normalize)
+        self.image_transform = ViNTImageTransform(image_size)
 
         # Create index using egowalk library
         # Note: context_length in egowalk includes the current frame,
@@ -209,8 +230,14 @@ class ViNT_Text_Dataset(Dataset):
         # Goal text
         goal_text = item["goal_text"]
 
-        # Actions [len_traj_pred, 4]
+        # Actions [len_traj_pred, 4] - (x, y, sin, cos)
         action = item["action"]
+
+        # Normalize action waypoints (critical for generalization)
+        # Same as original ViNT: divide x,y by metric_waypoint_spacing
+        if self.normalize:
+            action = action.clone()  # Don't modify original data
+            action[:, :2] = action[:, :2] / self.data_config["metric_waypoint_spacing"]
 
         return obs_img, goal_text, action
 

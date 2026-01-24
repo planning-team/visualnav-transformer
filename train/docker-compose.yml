@@ -29,7 +29,7 @@ services:
       # Mount the training code (adjust path as needed on your machine)
       - ./:/workspace/train
       # Mount egowalk-dataset library (should be cloned on your machine)
-      - ../egowalk-dataset:/workspace/egowalk-dataset
+      - ../../egowalk-dataset:/workspace/egowalk-dataset
       # Mount EgoWalk data - OUR SERVER PATH
       - /mnt/vol0/hf_cache/egowalk/:/workspace/data
       # Mount annotations - SEPARATE PATH on the server
@@ -44,6 +44,7 @@ services:
     # Environment variables
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
+      - EGOWALK_LIB_PATH=/workspace/egowalk-dataset
       - HF_EGOWALK_HOME=/workspace/data
       - HF_HOME=/workspace/cache/huggingface
       - TRANSFORMERS_CACHE=/workspace/cache/transformers
