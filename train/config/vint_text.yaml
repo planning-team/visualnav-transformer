@@ -41,7 +41,7 @@ siglip_cache_dir: "/workspace/cache/siglip2"
 freeze_siglip: True
 
 # ViNT checkpoint (empty = train from scratch)
-load_vint_checkpoint: ""
+load_vint_checkpoint: "/workspace/checkpoints/vint.pth"
 freeze_vint: True
 
 # Normalization
