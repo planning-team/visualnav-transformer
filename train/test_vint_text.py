@@ -122,7 +122,7 @@ def compute_multi_step_accuracy(pred_actions, gt_actions, thresholds=[0.5, 1.0, 
 
 
 @torch.no_grad()
-def evaluate_model(model, dataloader, device, use_tqdm=True):
+def evaluate_model(model, dataloader, device, metric_waypoint_spacing, use_tqdm=True):
     """
     Evaluate model on a dataset.
 
@@ -130,6 +130,7 @@ def evaluate_model(model, dataloader, device, use_tqdm=True):
         model: ViNT_Text model
         dataloader: Test dataloader
         device: torch device
+        metric_waypoint_spacing: Normalization factor to convert to meters
         use_tqdm: Whether to show progress bar
 
     Returns:
@@ -154,10 +155,17 @@ def evaluate_model(model, dataloader, device, use_tqdm=True):
         # Forward pass
         _, action_pred = model(obs_image, goal_text)
 
-        # Compute metrics
-        waypoint_metrics = compute_waypoint_error(action_pred, action_label)
-        orientation_metrics = compute_orientation_error(action_pred, action_label)
-        success_metrics = compute_multi_step_accuracy(action_pred, action_label)
+        # Denormalize x,y coordinates to meters for metric computation
+        # Both predictions and labels are normalized, so multiply by metric_waypoint_spacing
+        action_pred_denorm = action_pred.clone()
+        action_label_denorm = action_label.clone()
+        action_pred_denorm[:, :, :2] = action_pred[:, :, :2] * metric_waypoint_spacing
+        action_label_denorm[:, :, :2] = action_label[:, :, :2] * metric_waypoint_spacing
+
+        # Compute metrics in actual meters
+        waypoint_metrics = compute_waypoint_error(action_pred_denorm, action_label_denorm)
+        orientation_metrics = compute_orientation_error(action_pred_denorm, action_label_denorm)
+        success_metrics = compute_multi_step_accuracy(action_pred_denorm, action_label_denorm)
 
         # Store for aggregation
         all_waypoint_errors.append(waypoint_metrics['mean_waypoint_error'])
@@ -237,6 +245,13 @@ def main(args):
 
     print(f"Test dataset size: {len(test_dataset)}")
 
+    # Load metric_waypoint_spacing for denormalization
+    data_config_path = os.path.join(os.path.dirname(__file__), "vint_train", "data", "data_config.yaml")
+    with open(data_config_path, 'r') as f:
+        data_config = yaml.safe_load(f)
+    metric_waypoint_spacing = data_config["egowalk"]["metric_waypoint_spacing"]
+    print(f"Metric waypoint spacing: {metric_waypoint_spacing} m")
+
     # Create dataloader
     test_loader = ViNT_Text_DataLoader(
         test_dataset,
@@ -292,11 +307,15 @@ def main(args):
     print("Starting evaluation...")
     print("="*50 + "\n")
 
-    results = evaluate_model(model, test_loader, device, use_tqdm=True)
+    results = evaluate_model(model, test_loader, device, metric_waypoint_spacing, use_tqdm=True)
+
+    # Add metric_waypoint_spacing to results for reference
+    results['metric_waypoint_spacing'] = metric_waypoint_spacing
 
     # Print results
     print("\n" + "="*50)
     print("EVALUATION RESULTS")
+    print(f"(metric_waypoint_spacing: {metric_waypoint_spacing} m)")
     print("="*50)
     print(f"\nWaypoint Position Error:")
     print(f"  Mean: {results['mean_waypoint_error_m']:.4f} m")
