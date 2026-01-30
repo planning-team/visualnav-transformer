@@ -201,8 +201,26 @@ def main(args):
     print("Creating test dataset...")
     egowalk_config = config["egowalk_text"]
 
-    full_dataset = ViNT_Text_Dataset(
-        trajectories=egowalk_config.get("trajectories"),
+    # Load trajectory split file (required)
+    trajectory_split_file = egowalk_config.get("trajectory_split_file")
+    if not trajectory_split_file:
+        raise ValueError(
+            "trajectory_split_file must be specified in config under egowalk_text.\n"
+            "This ensures testing uses the exact same split as training."
+        )
+
+    print(f"Loading trajectory split from {trajectory_split_file}...")
+    with open(trajectory_split_file, 'r') as f:
+        split_data = yaml.safe_load(f)
+
+    test_trajectories = split_data.get('test')
+    if not test_trajectories:
+        raise ValueError(f"No 'test' key found in {trajectory_split_file}")
+
+    print(f"Test trajectories from split file: {len(test_trajectories)}")
+
+    test_dataset = ViNT_Text_Dataset(
+        trajectories=test_trajectories,
         context_size=config["context_size"],
         len_traj_pred=config["len_traj_pred"],
         image_size=tuple(config["image_size"]),
@@ -215,17 +233,6 @@ def main(args):
         annotations_path=egowalk_config.get("annotations_path"),
         annotations_subset=egowalk_config.get("annotations_subset", "end2end"),
         n_workers=0,  # Sequential for testing
-    )
-
-    # Split into train/test (use same split as training)
-    train_fraction = config.get("train_fraction", 0.8)
-    total_size = len(full_dataset)
-    train_size = int(total_size * train_fraction)
-    test_size = total_size - train_size
-
-    _, test_dataset = torch.utils.data.random_split(
-        full_dataset, [train_size, test_size],
-        generator=torch.Generator().manual_seed(config.get("seed", 0))
     )
 
     print(f"Test dataset size: {len(test_dataset)}")
