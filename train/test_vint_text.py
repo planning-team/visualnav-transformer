@@ -212,6 +212,8 @@ def main(args):
         context_step=egowalk_config.get("context_step", 1),
         action_step=egowalk_config.get("action_step", 1),
         data_path=egowalk_config["data_path"],
+        annotations_path=egowalk_config.get("annotations_path"),
+        annotations_subset=egowalk_config.get("annotations_subset", "end2end"),
         n_workers=0,  # Sequential for testing
     )
 
