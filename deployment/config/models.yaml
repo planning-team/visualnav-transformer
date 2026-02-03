@@ -1,18 +1,39 @@
 vint: 
-  config_path: "../../train/config/vint.yaml"
-  ckpt_path: "../model_weights/vint.pth"
+  config_path: "/home/captain/visualnav-transformer/train/config/vint.yaml"
+  ckpt_path: "/home/captain/visualnav-transformer/deployment/model_weights/vint.pth"
 
 late_fusion: 
-  config_path: "../../train/config/late_fusion.yaml"
-  ckpt_path: "../model_weights/vint_late_fusion.pth"
+  config_path: "/home/captain/visualnav-transformer/train/config/late_fusion.yaml"
+  ckpt_path: "/home/captain/visualnav-transformer/deployment/model_weights/vint_late_fusion.pth"
 
 gnm: 
   config_path: "../../train/config/gnm.yaml"
   ckpt_path: "../model_weights/gnm_large.pth"
 
 nomad: 
-  config_path: "../../train/config/nomad.yaml"
-  ckpt_path: "../model_weights/nomad.pth"
+  config_path: "/home/captain/visualnav-transformer/train/config/nomad.yaml"
+  ckpt_path: "/home/captain/visualnav-transformer/deployment/model_weights/nomad.pth"
 
+vint_ew: 
+  config_path: "/home/captain/visualnav-transformer/train/config/vint_ew.yaml"
+  ckpt_path: "/home/captain/visualnav-transformer/deployment/model_weights/vint_ew.pth"
+
+nomad_ew: 
+  config_path: "/home/captain/visualnav-transformer/train/config/nomad_ew.yaml"
+  ckpt_path: "/home/captain/visualnav-transformer/deployment/model_weights/nomad_ew.pth"
+
+
+
+vint_all: 
+  config_path: "/home/captain/visualnav-transformer/train/config/vint_all.yaml"
+  ckpt_path: "/home/captain/visualnav-transformer/deployment/model_weights/vint_all.pth"
+
+vint_ew_ft: 
+  config_path: "/home/captain/visualnav-transformer/train/config/vint_ew_ft.yaml"
+  ckpt_path: "/home/captain/visualnav-transformer/deployment/model_weights/vint_ew_ft.pth"
+
+nomad_ew_ft: 
+  config_path: "/home/captain/visualnav-transformer/train/config/nomad_ew_ft.yaml"
+  ckpt_path: "/home/captain/visualnav-transformer/deployment/model_weights/nomad_ew_ft.pth"
 
 # add your own model configs here after saving the *.pth file to ../model_weight
