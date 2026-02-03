@@ -23,20 +23,280 @@ IMPORT YOUR MODEL HERE
 from vint_train.models.gnm.gnm import GNM
 from vint_train.models.vint.vint import ViNT
 from vint_train.models.vint.vit import ViT
+from vint_train.models.vint.vint_text import ViNT_Text
 from vint_train.models.nomad.nomad import NoMaD, DenseNetwork
 from vint_train.models.nomad.nomad_vint import NoMaD_ViNT, replace_bn_with_gn
 from diffusion_policy.model.diffusion.conditional_unet1d import ConditionalUnet1D
 
 
 from vint_train.data.vint_dataset import ViNT_Dataset
+from vint_train.data.vint_text_dataset import ViNT_Text_Dataset, ViNT_Text_DataLoader
 from vint_train.training.train_eval_loop import (
     train_eval_loop,
     train_eval_loop_nomad,
+    train_eval_loop_text,
     load_model,
 )
 
 
+def main_text(config):
+    """Main training function for ViNT_Text model with text goals."""
+    if torch.cuda.is_available():
+        os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+        if "gpu_ids" not in config:
+            config["gpu_ids"] = [0]
+        elif type(config["gpu_ids"]) == int:
+            config["gpu_ids"] = [config["gpu_ids"]]
+        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(
+            [str(x) for x in config["gpu_ids"]]
+        )
+        print("Using cuda devices:", os.environ["CUDA_VISIBLE_DEVICES"])
+    else:
+        print("Using cpu")
+
+    first_gpu_id = config["gpu_ids"][0]
+    device = torch.device(
+        f"cuda:{first_gpu_id}" if torch.cuda.is_available() else "cpu"
+    )
+
+    if "seed" in config:
+        np.random.seed(config["seed"])
+        torch.manual_seed(config["seed"])
+        cudnn.deterministic = True
+
+    cudnn.benchmark = True
+    transform = transforms.Compose([
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+
+    # Load EgoWalk text dataset
+    egowalk_config = config["egowalk_text"]
+
+    # Add egowalk library to path
+    import sys
+    if egowalk_config["egowalk_lib_path"] not in sys.path:
+        sys.path.insert(0, egowalk_config["egowalk_lib_path"])
+
+    # Set environment variable
+    os.environ["HF_EGOWALK_HOME"] = egowalk_config["data_path"]
+
+    # Check if using trajectory split file
+    trajectory_split_file = egowalk_config.get("trajectory_split_file")
+
+    if trajectory_split_file:
+        # Load pre-defined train/test split from file
+        print(f"Loading trajectory split from {trajectory_split_file}...")
+        with open(trajectory_split_file, 'r') as f:
+            split_data = yaml.safe_load(f)
+
+        train_trajectories = split_data['train']
+        test_trajectories = split_data['test']
+
+        print(f"Train trajectories: {len(train_trajectories)}")
+        print(f"Test trajectories: {len(test_trajectories)}")
+
+        # Create separate datasets
+        print("Creating train dataset...")
+        train_dataset = ViNT_Text_Dataset(
+            trajectories=train_trajectories,
+            context_size=config["context_size"],
+            len_traj_pred=config["len_traj_pred"],
+            image_size=tuple(config["image_size"]),
+            normalize=config.get("normalize", True),
+            caption_type=egowalk_config.get("caption_type", "caption"),
+            window_step=egowalk_config.get("window_step", 2),
+            context_step=egowalk_config.get("context_step", 1),
+            action_step=egowalk_config.get("action_step", 1),
+            data_path=egowalk_config["data_path"],
+            annotations_path=egowalk_config.get("annotations_path"),
+            annotations_subset=egowalk_config.get("annotations_subset", "end2end"),
+            n_workers=egowalk_config.get("n_index_workers", 0),
+        )
+
+        print("Creating test dataset...")
+        test_dataset = ViNT_Text_Dataset(
+            trajectories=test_trajectories,
+            context_size=config["context_size"],
+            len_traj_pred=config["len_traj_pred"],
+            image_size=tuple(config["image_size"]),
+            normalize=config.get("normalize", True),
+            caption_type=egowalk_config.get("caption_type", "caption"),
+            window_step=egowalk_config.get("window_step", 2),
+            context_step=egowalk_config.get("context_step", 1),
+            action_step=egowalk_config.get("action_step", 1),
+            data_path=egowalk_config["data_path"],
+            annotations_path=egowalk_config.get("annotations_path"),
+            annotations_subset=egowalk_config.get("annotations_subset", "end2end"),
+            n_workers=egowalk_config.get("n_index_workers", 0),
+        )
+
+        print(f"Train size: {len(train_dataset)}, Test size: {len(test_dataset)}")
+
+    else:
+        # Use old approach: single dataset with random split
+        print("Creating EgoWalk text dataset...")
+        full_dataset = ViNT_Text_Dataset(
+            trajectories=egowalk_config.get("trajectories"),
+            context_size=config["context_size"],
+            len_traj_pred=config["len_traj_pred"],
+            image_size=tuple(config["image_size"]),
+            normalize=config.get("normalize", True),
+            caption_type=egowalk_config.get("caption_type", "caption"),
+            window_step=egowalk_config.get("window_step", 2),
+            context_step=egowalk_config.get("context_step", 1),
+            action_step=egowalk_config.get("action_step", 1),
+            data_path=egowalk_config["data_path"],
+            annotations_path=egowalk_config.get("annotations_path"),
+            annotations_subset=egowalk_config.get("annotations_subset", "end2end"),
+            n_workers=egowalk_config.get("n_index_workers", 0),
+        )
+
+        # Split into train/test
+        train_fraction = config.get("train_fraction", 0.8)
+        total_size = len(full_dataset)
+        train_size = int(total_size * train_fraction)
+        test_size = total_size - train_size
+
+        train_dataset, test_dataset = torch.utils.data.random_split(
+            full_dataset, [train_size, test_size],
+            generator=torch.Generator().manual_seed(config.get("seed", 0))
+        )
+        print(f"Train size: {train_size}, Test size: {test_size}")
+
+    # Create data loaders with custom collate for text
+    train_loader = ViNT_Text_DataLoader(
+        train_dataset,
+        batch_size=config["batch_size"],
+        shuffle=True,
+        num_workers=config.get("num_workers", 4),
+        pin_memory=True,
+        drop_last=True,
+    )
+
+    test_dataloaders = {
+        "egowalk_test": ViNT_Text_DataLoader(
+            test_dataset,
+            batch_size=config.get("eval_batch_size", config["batch_size"]),
+            shuffle=False,
+            num_workers=0,
+            pin_memory=True,
+            drop_last=False,
+        )
+    }
+
+    # Create model
+    load_vint_checkpoint = config.get("load_vint_checkpoint", "")
+    if load_vint_checkpoint and os.path.exists(load_vint_checkpoint):
+        print(f"Loading pre-trained ViNT from: {load_vint_checkpoint}")
+        model = ViNT_Text.from_pretrained_vint(
+            vint_checkpoint_path=load_vint_checkpoint,
+            siglip_model_name=config.get("siglip_model_name", "google/siglip2-base-patch16-224"),
+            siglip_cache_dir=config.get("siglip_cache_dir"),
+            freeze_vint=config.get("freeze_vint", True),
+            freeze_siglip=config.get("freeze_siglip", True),
+            device=device,
+        )
+    else:
+        print("Creating ViNT_Text model from scratch")
+        model = ViNT_Text(
+            context_size=config["context_size"],
+            len_traj_pred=config["len_traj_pred"],
+            learn_angle=config["learn_angle"],
+            obs_encoder=config.get("obs_encoder", "efficientnet-b0"),
+            obs_encoding_size=config.get("obs_encoding_size", 512),
+            mha_num_attention_heads=config.get("mha_num_attention_heads", 4),
+            mha_num_attention_layers=config.get("mha_num_attention_layers", 4),
+            mha_ff_dim_factor=config.get("mha_ff_dim_factor", 4),
+            siglip_model_name=config.get("siglip_model_name", "google/siglip2-base-patch16-224"),
+            siglip_cache_dir=config.get("siglip_cache_dir"),
+            freeze_siglip=config.get("freeze_siglip", True),
+            freeze_vint=config.get("freeze_vint", False),  # Default False when training from scratch
+        )
+
+    # Print trainable parameters
+    model.print_trainable_parameters()
+
+    # Gradient clipping
+    if config.get("clipping", False):
+        print("Clipping gradients to", config["max_norm"])
+        for p in model.parameters():
+            if not p.requires_grad:
+                continue
+            p.register_hook(
+                lambda grad: torch.clamp(
+                    grad, -1 * config["max_norm"], config["max_norm"]
+                )
+            )
+
+    # Optimizer (only trainable params)
+    lr = float(config["lr"])
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    optimizer_name = config.get("optimizer", "adamw").lower()
+    if optimizer_name == "adam":
+        optimizer = Adam(trainable_params, lr=lr, betas=(0.9, 0.98))
+    elif optimizer_name == "adamw":
+        optimizer = AdamW(trainable_params, lr=lr)
+    else:
+        raise ValueError(f"Optimizer {optimizer_name} not supported")
+
+    # Scheduler
+    scheduler = None
+    if config.get("scheduler"):
+        scheduler_name = config["scheduler"].lower()
+        if scheduler_name == "cosine":
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=config["epochs"]
+            )
+        elif scheduler_name == "plateau":
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer,
+                factor=config.get("plateau_factor", 0.5),
+                patience=config.get("plateau_patience", 3),
+                verbose=True,
+            )
+
+        if config.get("warmup", False):
+            scheduler = GradualWarmupScheduler(
+                optimizer,
+                multiplier=1,
+                total_epoch=config.get("warmup_epochs", 2),
+                after_scheduler=scheduler,
+            )
+
+    # Move to device
+    model = model.to(device)
+
+    # Training loop
+    train_eval_loop_text(
+        train_model=config.get("train", True),
+        model=model,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        dataloader=train_loader,
+        test_dataloaders=test_dataloaders,
+        transform=transform,
+        epochs=config["epochs"],
+        device=device,
+        project_folder=config["project_folder"],
+        wandb_log_freq=config.get("wandb_log_freq", 10),
+        print_log_freq=config.get("print_log_freq", 50),
+        image_log_freq=config.get("image_log_freq", 500),
+        num_images_log=config.get("num_images_log", 4),
+        current_epoch=0,
+        learn_angle=config.get("learn_angle", True),
+        use_wandb=config.get("use_wandb", True),
+        eval_fraction=config.get("eval_fraction", 0.5),
+        gradient_accumulation_steps=config.get("gradient_accumulation_steps", 1),
+    )
+
+    print("FINISHED TRAINING ViNT_Text")
+
+
 def main(config):
+    # Check if this is a vint_text model
+    if config.get("model_type") == "vint_text":
+        return main_text(config)
+
     assert config["distance"]["min_dist_cat"] < config["distance"]["max_dist_cat"]
     assert config["action"]["min_dist_cat"] < config["action"]["max_dist_cat"]
 
@@ -387,10 +647,11 @@ if __name__ == "__main__":
 
     if config["use_wandb"]:
         wandb.login()
+        wandb_entity = config.get("wandb_entity", None)
         wandb.init(
             project=config["project_name"],
             settings=wandb.Settings(start_method="fork"),
-            entity="rentgeny05-tu-delft", # TODO: change this to your wandb entity
+            entity=wandb_entity,
         )
         wandb.save(args.config, policy="now")  # save the config file
         wandb.run.name = config["run_name"]

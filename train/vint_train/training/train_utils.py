@@ -1035,6 +1035,281 @@ def model_output(
     }
 
 
+# Train utils for ViNT_Text (text goals)
+
+def _compute_losses_text(
+    action_label: torch.Tensor,
+    action_pred: torch.Tensor,
+    learn_angle: bool,
+):
+    """
+    Compute losses for action prediction with text goals.
+    No distance prediction since text goals don't have meaningful distance.
+    """
+    # Action loss (MSE)
+    action_loss = F.mse_loss(action_pred, action_label)
+
+    # Waypoint cosine similarity
+    action_waypts_cos_sim = F.cosine_similarity(
+        action_pred[:, :, :2], action_label[:, :, :2], dim=-1
+    ).mean()
+
+    multi_action_waypts_cos_sim = F.cosine_similarity(
+        torch.flatten(action_pred[:, :, :2], start_dim=1),
+        torch.flatten(action_label[:, :, :2], start_dim=1),
+        dim=-1,
+    ).mean()
+
+    results = {
+        "action_loss": action_loss,
+        "action_waypts_cos_sim": action_waypts_cos_sim,
+        "multi_action_waypts_cos_sim": multi_action_waypts_cos_sim,
+        "total_loss": action_loss,  # Only action loss for text goals
+    }
+
+    if learn_angle:
+        action_orien_cos_sim = F.cosine_similarity(
+            action_pred[:, :, 2:], action_label[:, :, 2:], dim=-1
+        ).mean()
+        multi_action_orien_cos_sim = F.cosine_similarity(
+            torch.flatten(action_pred[:, :, 2:], start_dim=1),
+            torch.flatten(action_label[:, :, 2:], start_dim=1),
+            dim=-1,
+        ).mean()
+        results["action_orien_cos_sim"] = action_orien_cos_sim
+        results["multi_action_orien_cos_sim"] = multi_action_orien_cos_sim
+
+    return results
+
+
+def train_text(
+    model: nn.Module,
+    optimizer: Adam,
+    dataloader,  # ViNT_Text_DataLoader
+    transform: transforms,
+    device: torch.device,
+    project_folder: str,
+    epoch: int,
+    learn_angle: bool = True,
+    print_log_freq: int = 100,
+    wandb_log_freq: int = 10,
+    image_log_freq: int = 1000,
+    num_images_log: int = 8,
+    use_wandb: bool = True,
+    use_tqdm: bool = True,
+    gradient_accumulation_steps: int = 1,
+):
+    """
+    Train the ViNT_Text model for one epoch.
+
+    Args:
+        model: ViNT_Text model to train
+        optimizer: optimizer to use
+        dataloader: ViNT_Text_DataLoader for training
+        transform: transform to apply to observation images
+        device: device to use
+        project_folder: folder to save images to
+        epoch: current epoch
+        learn_angle: whether to learn the angle of the action
+        print_log_freq: how often to print loss
+        wandb_log_freq: how often to log to wandb
+        image_log_freq: how often to log images
+        num_images_log: number of images to log
+        use_wandb: whether to use wandb
+        use_tqdm: whether to use tqdm
+    """
+    model.train()
+
+    action_loss_logger = Logger("action_loss", "train", window_size=print_log_freq)
+    action_waypts_cos_sim_logger = Logger(
+        "action_waypts_cos_sim", "train", window_size=print_log_freq
+    )
+    multi_action_waypts_cos_sim_logger = Logger(
+        "multi_action_waypts_cos_sim", "train", window_size=print_log_freq
+    )
+    total_loss_logger = Logger("total_loss", "train", window_size=print_log_freq)
+
+    loggers = {
+        "action_loss": action_loss_logger,
+        "action_waypts_cos_sim": action_waypts_cos_sim_logger,
+        "multi_action_waypts_cos_sim": multi_action_waypts_cos_sim_logger,
+        "total_loss": total_loss_logger,
+    }
+
+    if learn_angle:
+        action_orien_cos_sim_logger = Logger(
+            "action_orien_cos_sim", "train", window_size=print_log_freq
+        )
+        multi_action_orien_cos_sim_logger = Logger(
+            "multi_action_orien_cos_sim", "train", window_size=print_log_freq
+        )
+        loggers["action_orien_cos_sim"] = action_orien_cos_sim_logger
+        loggers["multi_action_orien_cos_sim"] = multi_action_orien_cos_sim_logger
+
+    num_batches = len(dataloader)
+    tqdm_iter = tqdm.tqdm(
+        dataloader,
+        disable=not use_tqdm,
+        dynamic_ncols=True,
+        desc=f"Training epoch {epoch}",
+    )
+
+    # Initialize gradients
+    optimizer.zero_grad()
+
+    for i, data in enumerate(tqdm_iter):
+        # Unpack data: (obs_img, goal_text, action)
+        obs_image, goal_text, action_label = data
+
+        # Transform observation images
+        obs_images = torch.split(obs_image, 3, dim=1)
+        obs_images = [transform(obs_img).to(device) for obs_img in obs_images]
+        obs_image = torch.cat(obs_images, dim=1)
+
+        # Action labels to device
+        action_label = action_label.to(device)
+
+        # Forward pass (goal_text is passed as list of strings)
+        dist_pred, action_pred = model(obs_image, goal_text)
+
+        # Compute losses (no distance loss for text goals)
+        losses = _compute_losses_text(
+            action_label=action_label,
+            action_pred=action_pred,
+            learn_angle=learn_angle,
+        )
+
+        # Scale loss for gradient accumulation
+        loss = losses["total_loss"] / gradient_accumulation_steps
+        loss.backward()
+
+        # Update weights after accumulating gradients
+        if (i + 1) % gradient_accumulation_steps == 0:
+            optimizer.step()
+            optimizer.zero_grad()
+
+        # Log losses
+        for key, value in losses.items():
+            if key in loggers:
+                logger = loggers[key]
+                logger.log_data(value.item())
+
+        # Print and wandb logging
+        if i % print_log_freq == 0 and print_log_freq != 0:
+            for key, logger in loggers.items():
+                print(f"(epoch {epoch}) (batch {i}/{num_batches - 1}) {logger.display()}")
+
+        if use_wandb and i % wandb_log_freq == 0 and wandb_log_freq != 0:
+            data_log = {logger.full_name(): logger.latest() for key, logger in loggers.items()}
+            wandb.log(data_log, commit=True)
+
+
+def evaluate_text(
+    eval_type: str,
+    model: nn.Module,
+    dataloader,  # ViNT_Text_DataLoader
+    transform: transforms,
+    device: torch.device,
+    project_folder: str,
+    epoch: int = 0,
+    learn_angle: bool = True,
+    num_images_log: int = 8,
+    use_wandb: bool = True,
+    eval_fraction: float = 1.0,
+    use_tqdm: bool = True,
+):
+    """
+    Evaluate the ViNT_Text model on the given evaluation dataset.
+
+    Args:
+        eval_type: evaluation type name
+        model: ViNT_Text model to evaluate
+        dataloader: ViNT_Text_DataLoader for eval
+        transform: transform to apply to observation images
+        device: device to use for evaluation
+        project_folder: path to project folder
+        epoch: current epoch
+        learn_angle: whether to learn the angle of the action
+        num_images_log: number of images to log
+        use_wandb: whether to use wandb for logging
+        eval_fraction: fraction of data to use for evaluation
+        use_tqdm: whether to use tqdm for logging
+
+    Returns:
+        action_loss: average action loss
+        total_loss: average total loss
+    """
+    model.eval()
+
+    action_loss_logger = Logger("action_loss", eval_type)
+    action_waypts_cos_sim_logger = Logger("action_waypts_cos_sim", eval_type)
+    multi_action_waypts_cos_sim_logger = Logger("multi_action_waypts_cos_sim", eval_type)
+    total_loss_logger = Logger("total_loss", eval_type)
+
+    loggers = {
+        "action_loss": action_loss_logger,
+        "action_waypts_cos_sim": action_waypts_cos_sim_logger,
+        "multi_action_waypts_cos_sim": multi_action_waypts_cos_sim_logger,
+        "total_loss": total_loss_logger,
+    }
+
+    if learn_angle:
+        action_orien_cos_sim_logger = Logger("action_orien_cos_sim", eval_type)
+        multi_action_orien_cos_sim_logger = Logger("multi_action_orien_cos_sim", eval_type)
+        loggers["action_orien_cos_sim"] = action_orien_cos_sim_logger
+        loggers["multi_action_orien_cos_sim"] = multi_action_orien_cos_sim_logger
+
+    num_batches = len(dataloader)
+    num_batches = max(int(num_batches * eval_fraction), 1)
+
+    with torch.no_grad():
+        tqdm_iter = tqdm.tqdm(
+            itertools.islice(dataloader, num_batches),
+            total=num_batches,
+            disable=not use_tqdm,
+            dynamic_ncols=True,
+            desc=f"Evaluating {eval_type} for epoch {epoch}",
+        )
+
+        for i, data in enumerate(tqdm_iter):
+            # Unpack data
+            obs_image, goal_text, action_label = data
+
+            # Transform observation images
+            obs_images = torch.split(obs_image, 3, dim=1)
+            obs_images = [transform(obs_img).to(device) for obs_img in obs_images]
+            obs_image = torch.cat(obs_images, dim=1)
+
+            # Action labels to device
+            action_label = action_label.to(device)
+
+            # Forward pass
+            dist_pred, action_pred = model(obs_image, goal_text)
+
+            # Compute losses
+            losses = _compute_losses_text(
+                action_label=action_label,
+                action_pred=action_pred,
+                learn_angle=learn_angle,
+            )
+
+            # Log losses
+            for key, value in losses.items():
+                if key in loggers:
+                    logger = loggers[key]
+                    logger.log_data(value.item())
+
+    # Log final averages
+    if use_wandb:
+        data_log = {logger.full_name(): logger.average() for key, logger in loggers.items()}
+        wandb.log(data_log, commit=False)
+
+    for key, logger in loggers.items():
+        print(f"(epoch {epoch}) {logger.full_name()} {logger.average()}")
+
+    return action_loss_logger.average(), total_loss_logger.average()
+
+
 def visualize_diffusion_action_distribution(
     ema_model: nn.Module,
     noise_scheduler: DDPMScheduler,

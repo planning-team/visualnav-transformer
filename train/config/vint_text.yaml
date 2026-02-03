@@ -1,0 +1,93 @@
+# ViNT Text Training Config - NABO SERVER (A100 80GB)
+# Use this config for full training on high-resource machines
+# Run: python train.py --config config/vint_text.yaml
+# For local laptop, use: python train.py --config config/vint_text_local.yaml
+
+project_name: egowalk_vint_text
+run_name: vint-text
+
+# Training setup - FULL training
+use_wandb: True
+train: True
+batch_size: 512
+eval_batch_size: 512
+epochs: 100
+gpu_ids: [0]
+num_workers: 32  # More workers for faster data loading (up to 32 on tomate/nabo)
+lr: 1e-4
+optimizer: adamw
+clipping: True
+max_norm: 1.0
+scheduler: "cosine"
+warmup: True
+warmup_epochs: 5
+seed: 0
+
+# No gradient accumulation needed with large batch
+gradient_accumulation_steps: 1
+
+# Model params
+model_type: vint_text
+obs_encoder: "efficientnet-b0"
+obs_encoding_size: 512
+mha_num_attention_heads: 4
+mha_num_attention_layers: 4
+mha_ff_dim_factor: 4
+late_fusion: False
+
+# SigLIP2 text encoder
+siglip_model_name: "google/siglip2-base-patch16-224"
+siglip_cache_dir: "/workspace/cache/siglip2"
+freeze_siglip: True
+
+# ViNT checkpoint (empty = train from scratch)
+load_vint_checkpoint: "/workspace/checkpoints/vint.pth"
+freeze_vint: True
+
+# Normalization
+normalize: True
+
+# Context
+context_type: temporal
+context_size: 5
+
+# Action output
+len_traj_pred: 5
+learn_angle: True
+
+# Dataset
+image_size: [85, 64]
+goal_type: "text"
+
+# EgoWalk text dataset - SERVER PATHS (CONTAINER PATHS)
+egowalk_text:
+  egowalk_lib_path: "/workspace/egowalk-dataset"
+  # Data path: root directory containing EgoWalk/trajectories
+  data_path: "/workspace/data"
+  # Annotations path: separate mount for annotations
+  annotations_path: "/workspace/annotations"
+  annotations_subset: "end2end"
+  # Use brief captions (as in the example notebook)
+  caption_type: "brief"
+  # Trajectory split file for reproducible train/test split
+  # Generate with: python generate_trajectory_split.py --output config/trajectory_split.yaml
+  trajectory_split_file: "config/trajectory_split.yaml"
+  # Smaller window step = more samples
+  window_step: 1
+  context_step: 1
+  action_step: 1
+  n_index_workers: 16  # More workers for A100 server
+
+# Train/test split (90% train / 10% test)
+train_fraction: 0.9
+
+# Logging
+print_log_freq: 100
+image_log_freq: 1000
+num_images_log: 4
+eval_fraction: 0.25
+wandb_log_freq: 50
+eval_freq: 1
+
+# W&B
+wandb_entity: "egowalk-vint-text-goals"

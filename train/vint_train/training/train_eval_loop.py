@@ -313,3 +313,128 @@ def count_parameters(model):
     # print(table)
     print(f"Total Trainable Params: {total_params/1e6:.2f}M")
     return total_params
+
+
+def train_eval_loop_text(
+    train_model: bool,
+    model: nn.Module,
+    optimizer: Adam,
+    scheduler: Optional[torch.optim.lr_scheduler._LRScheduler],
+    dataloader,  # ViNT_Text_DataLoader
+    test_dataloaders: Dict[str, any],
+    transform: transforms,
+    epochs: int,
+    device: torch.device,
+    project_folder: str,
+    wandb_log_freq: int = 10,
+    print_log_freq: int = 100,
+    image_log_freq: int = 1000,
+    num_images_log: int = 8,
+    current_epoch: int = 0,
+    learn_angle: bool = True,
+    use_wandb: bool = True,
+    eval_fraction: float = 0.25,
+    gradient_accumulation_steps: int = 1,
+):
+    """
+    Train and evaluate ViNT_Text model with text goals.
+
+    Args:
+        train_model: whether to train the model or not
+        model: ViNT_Text model to train
+        optimizer: optimizer to use
+        scheduler: learning rate scheduler to use
+        dataloader: ViNT_Text_DataLoader for training
+        test_dataloaders: dict of dataloaders for testing
+        transform: transform to apply to observation images
+        epochs: number of epochs to train
+        device: device to train on
+        project_folder: folder to save checkpoints and logs
+        wandb_log_freq: frequency of logging to wandb
+        print_log_freq: frequency of printing to console
+        image_log_freq: frequency of logging images to wandb
+        num_images_log: number of images to log to wandb
+        current_epoch: epoch to start training from
+        learn_angle: whether to learn the angle or not
+        use_wandb: whether to log to wandb or not
+        eval_fraction: fraction of training data to use for evaluation
+    """
+    from vint_train.training.train_utils import train_text, evaluate_text
+
+    latest_path = os.path.join(project_folder, f"latest.pth")
+
+    for epoch in range(current_epoch, current_epoch + epochs):
+        if train_model:
+            print(
+                f"Start ViNT-Text Training Epoch {epoch}/{current_epoch + epochs - 1}"
+            )
+            train_text(
+                model=model,
+                optimizer=optimizer,
+                dataloader=dataloader,
+                transform=transform,
+                device=device,
+                project_folder=project_folder,
+                epoch=epoch,
+                learn_angle=learn_angle,
+                print_log_freq=print_log_freq,
+                wandb_log_freq=wandb_log_freq,
+                image_log_freq=image_log_freq,
+                num_images_log=num_images_log,
+                use_wandb=use_wandb,
+                gradient_accumulation_steps=gradient_accumulation_steps,
+            )
+
+        avg_total_test_loss = []
+        for dataset_type in test_dataloaders:
+            print(
+                f"Start {dataset_type} ViNT-Text Testing Epoch {epoch}/{current_epoch + epochs - 1}"
+            )
+            loader = test_dataloaders[dataset_type]
+
+            test_action_loss, total_eval_loss = evaluate_text(
+                eval_type=dataset_type,
+                model=model,
+                dataloader=loader,
+                transform=transform,
+                device=device,
+                project_folder=project_folder,
+                epoch=epoch,
+                learn_angle=learn_angle,
+                num_images_log=num_images_log,
+                use_wandb=use_wandb,
+                eval_fraction=eval_fraction,
+            )
+
+            avg_total_test_loss.append(total_eval_loss)
+
+        checkpoint = {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "avg_total_test_loss": np.mean(avg_total_test_loss) if avg_total_test_loss else 0,
+            "scheduler_state_dict": scheduler.state_dict() if scheduler else None,
+        }
+
+        if use_wandb:
+            wandb.log({}, commit=False)
+
+        if scheduler is not None:
+            if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                scheduler.step(np.mean(avg_total_test_loss) if avg_total_test_loss else 0)
+            else:
+                scheduler.step()
+
+        if use_wandb:
+            wandb.log({
+                "avg_total_test_loss": np.mean(avg_total_test_loss) if avg_total_test_loss else 0,
+                "lr": optimizer.param_groups[0]["lr"],
+            }, commit=False)
+
+        numbered_path = os.path.join(project_folder, f"{epoch}.pth")
+        torch.save(checkpoint, latest_path)
+        torch.save(checkpoint, numbered_path)
+
+    if use_wandb:
+        wandb.log({})
+    print()

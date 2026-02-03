@@ -1,0 +1,60 @@
+# Docker Compose for A Server (A100 80GB)
+# Usage: docker compose up -d
+# Then: docker exec -it vint-text-train bash
+# For local laptop, use: docker compose -f docker-compose.local.yml up -d
+
+services:
+  vint-text-train:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vint-text-train:latest
+    container_name: vint-text-train
+
+    # GPU support (A100 80GB)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    # Interactive mode
+    stdin_open: true
+    tty: true
+
+    # Volume mounts - OUR SERVER PATHS
+    volumes:
+      # Mount the training code (adjust path as needed on your machine)
+      - ./:/workspace/train
+      # Mount egowalk-dataset library (should be cloned on your machine)
+      - ../../egowalk-dataset:/workspace/egowalk-dataset
+      # Mount EgoWalk data - OUR SERVER PATH
+      - /mnt/vol0/hf_cache/egowalk/:/workspace/data
+      # Mount annotations - SEPARATE PATH on the server
+      - /mnt/vol0/datasets/egowalk_lang/release/annotations:/workspace/annotations
+      # Cache directory for HuggingFace models
+      - ./cache:/workspace/cache
+      # Logs directory
+      - ./logs:/workspace/train/logs
+      # W&B config to persist login credentials
+      - ./wandb_config:/root/.config/wandb
+
+    # Environment variables
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - EGOWALK_LIB_PATH=/workspace/egowalk-dataset
+      - HF_EGOWALK_HOME=/workspace/data
+      - HF_HOME=/workspace/cache/huggingface
+      - TRANSFORMERS_CACHE=/workspace/cache/transformers
+      - PYTHONPATH=/workspace/train:/workspace/egowalk-dataset:/workspace/diffusion_policy
+
+    # Working directory
+    working_dir: /workspace/train
+
+    # Network mode
+    network_mode: host
+
+    # Shared memory (32GB for DataLoader - A100 has 256GB RAM)
+    shm_size: '32gb'
