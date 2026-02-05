@@ -20,6 +20,7 @@ from typing import List, Tuple, Dict, Optional
 # models
 from vint_train.models.gnm.gnm import GNM
 from vint_train.models.vint.vint import ViNT
+from vint_train.models.vint.vint_text import ViNT_Text
 
 from vint_train.models.vint.vit import ViT
 from vint_train.models.nomad.nomad import NoMaD, DenseNetwork
@@ -56,6 +57,21 @@ def load_model(
             mha_num_attention_heads=config["mha_num_attention_heads"],
             mha_num_attention_layers=config["mha_num_attention_layers"],
             mha_ff_dim_factor=config["mha_ff_dim_factor"],
+        )
+    elif model_type == "vint_text":
+        model = ViNT_Text(
+            context_size=config["context_size"],
+            len_traj_pred=config["len_traj_pred"],
+            learn_angle=config["learn_angle"],
+            obs_encoder=config["obs_encoder"],
+            obs_encoding_size=config["obs_encoding_size"],
+            mha_num_attention_heads=config["mha_num_attention_heads"],
+            mha_num_attention_layers=config["mha_num_attention_layers"],
+            mha_ff_dim_factor=config["mha_ff_dim_factor"],
+            siglip_model_name=config.get("siglip_model_name", "google/siglip2-base-patch16-224"),
+            siglip_cache_dir=config.get("siglip_cache_dir", None),
+            freeze_siglip=config.get("freeze_siglip", True),
+            freeze_vint=False,  # Already trained, no need to freeze during inference
         )
     elif config["model_type"] == "nomad":
         if config["vision_encoder"] == "nomad_vint":
@@ -99,6 +115,23 @@ def load_model(
     checkpoint = torch.load(model_path, map_location=device)
     if model_type == "nomad":
         state_dict = checkpoint
+        model.load_state_dict(state_dict, strict=False)
+    elif model_type == "vint_text":
+        # vint_text checkpoints store state_dict directly or in "model_state_dict" key
+        if "model_state_dict" in checkpoint:
+            state_dict = checkpoint["model_state_dict"]
+        elif "state_dict" in checkpoint:
+            state_dict = checkpoint["state_dict"]
+        elif "model" in checkpoint:
+            loaded_model = checkpoint["model"]
+            try:
+                state_dict = loaded_model.module.state_dict()
+            except AttributeError:
+                state_dict = loaded_model.state_dict()
+        else:
+            state_dict = checkpoint
+        # Remove 'module.' prefix if present (from DataParallel)
+        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
         model.load_state_dict(state_dict, strict=False)
     else:
         loaded_model = checkpoint["model"]

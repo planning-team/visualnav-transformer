@@ -101,6 +101,18 @@ class ViNT_Text(BaseModel):
         if freeze_vint:
             self.freeze_vint_components()
 
+    def encode_goal(self, goal_text: Union[str, List[str]]) -> torch.Tensor:
+        """
+        Pre-compute text goal embedding for efficient reuse during deployment.
+
+        Args:
+            goal_text: Text description(s) of goal(s)
+
+        Returns:
+            Goal embedding tensor [batch_size, 1, goal_encoding_size]
+        """
+        return self.text_encoder(goal_text)
+
     def forward(
         self,
         obs_img: torch.Tensor,
@@ -117,11 +129,33 @@ class ViNT_Text(BaseModel):
             dist_pred: Predicted distance to goal [batch, 1]
             action_pred: Predicted waypoints [batch, len_traj_pred, num_action_params]
         """
+        goal_encoding = self.encode_goal(goal_text)
+        return self.forward_with_goal_encoding(obs_img, goal_encoding)
+
+    def forward_with_goal_encoding(
+        self,
+        obs_img: torch.Tensor,
+        goal_encoding: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Forward pass with pre-computed goal encoding.
+
+        This is more efficient for deployment where the goal text doesn't change
+        but observations are updated continuously.
+
+        Args:
+            obs_img: Observation images [batch, 3*(context_size+1), H, W]
+            goal_encoding: Pre-computed goal embedding [batch, 1, goal_encoding_size]
+
+        Returns:
+            dist_pred: Predicted distance to goal [batch, 1]
+            action_pred: Predicted waypoints [batch, len_traj_pred, num_action_params]
+        """
         batch_size = obs_img.shape[0]
 
-        # Encode text goal
-        # [batch_size, 1, goal_encoding_size]
-        goal_encoding = self.text_encoder(goal_text)
+        # Expand goal_encoding if batch sizes don't match (single goal, multiple obs)
+        if goal_encoding.shape[0] == 1 and batch_size > 1:
+            goal_encoding = goal_encoding.expand(batch_size, -1, -1)
 
         # Split observation into context frames
         # [batch_size, 3*(context_size+1), H, W] -> list of [batch_size, 3, H, W]

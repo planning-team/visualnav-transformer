@@ -36,4 +36,10 @@ nomad_ew_ft:
   config_path: "/home/captain/visualnav-transformer/train/config/nomad_ew_ft.yaml"
   ckpt_path: "/home/captain/visualnav-transformer/deployment/model_weights/nomad_ew_ft.pth"
 
+
+vint_text:
+  config_path: "/home/captain/visualnav-transformer/train/config/vint_text.yaml"
+  ckpt_path: "/home/captain/visualnav-transformer/deployment/model_weights/vint_text.pth"
+
+
 # add your own model configs here after saving the *.pth file to ../model_weight
