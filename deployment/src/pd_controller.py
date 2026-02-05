@@ -13,7 +13,8 @@ from ros_data import ROSData
 from utils import clip_angle
 
 # CONSTS
-CONFIG_PATH = "../config/robot.yaml"
+# CONFIG_PATH = "../config/robot.yaml"
+CONFIG_PATH = "/home/captain/visualnav-transformer/deployment/config/robot.yaml"
 with open(CONFIG_PATH, "r") as f:
 	robot_config = yaml.safe_load(f)
 MAX_V = robot_config["max_v"]

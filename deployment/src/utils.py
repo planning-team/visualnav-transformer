@@ -26,6 +26,7 @@ from vint_train.models.nomad.nomad import NoMaD, DenseNetwork
 from vint_train.models.nomad.nomad_vint import NoMaD_ViNT, replace_bn_with_gn
 from diffusion_policy.model.diffusion.conditional_unet1d import ConditionalUnet1D
 from vint_train.data.data_utils import IMAGE_ASPECT_RATIO
+import cv2
 
 
 def load_model(
@@ -114,6 +115,7 @@ def load_model(
 def msg_to_pil(msg: Image) -> PILImage.Image:
     img = np.frombuffer(msg.data, dtype=np.uint8).reshape(
         msg.height, msg.width, -1)
+    img = cv2.cvtColor(img, cv2.COLOR_BGRA2RGB)
     pil_image = PILImage.fromarray(img)
     return pil_image
 

@@ -30,10 +30,10 @@ from topic_names import (IMAGE_TOPIC,
 
 
 # CONSTANTS
-TOPOMAP_IMAGES_DIR = "../topomaps/images"
-MODEL_WEIGHTS_PATH = "../model_weights"
-ROBOT_CONFIG_PATH ="../config/robot.yaml"
-MODEL_CONFIG_PATH = "../config/models.yaml"
+TOPOMAP_IMAGES_DIR = "/home/captain/visualnav-transformer/deployment/topomaps/images"
+MODEL_WEIGHTS_PATH = "/home/captain/visualnav-transformer/deployment/model_weights"
+ROBOT_CONFIG_PATH ="/home/captain/visualnav-transformer/deployment/config/robot.yaml"
+MODEL_CONFIG_PATH = "/home/captain/visualnav-transformer/deployment/config/models.yaml"
 with open(ROBOT_CONFIG_PATH, "r") as f:
     robot_config = yaml.safe_load(f)
 MAX_V = robot_config["max_v"]
@@ -48,6 +48,8 @@ subgoal = []
 # Load the model 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
+
+
 
 
 def callback_obs(msg):

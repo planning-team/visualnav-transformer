@@ -1,0 +1,25 @@
+version: '3'
+
+services:
+  vint:
+    image: vint
+    network_mode: "host"
+    container_name: vint
+    user: "1000:1000"  # UID:GID matching your beluga user
+    volumes:
+      - /home/beluga/visualnav-transformer:/home/captain/visualnav-transformer
+    working_dir: /home/captain
+    stdin_open: true  # docker run -i
+    tty: true        # docker run -t
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu] 
+    command: >
+      bash -c "cd /home/captain/visualnav-transformer &&
+      pip install -e diffusion_policy/ &&
+      pip install -e train/ &&
+      bash" 
