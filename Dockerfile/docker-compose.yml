@@ -1,13 +1,17 @@
 version: '3'
 
 services:
-  vint:
-    image: vint
+  vint-text:
+    build:
+      context: .
+      dockerfile: Dockerfile
     network_mode: "host"
-    container_name: vint
+    container_name: vint-text
     user: "1000:1000"  # UID:GID matching your beluga user
+    privileged: true  # Required for full USB access (Orbbec Femto Bolt)
     volumes:
-      - /home/beluga/visualnav-transformer:/home/captain/visualnav-transformer
+      - /home/beluga/projects/vint-text:/home/captain/visualnav-transformer
+      - /dev:/dev  # Full device access for USB camera
     working_dir: /home/captain
     stdin_open: true  # docker run -i
     tty: true        # docker run -t
@@ -17,9 +21,9 @@ services:
           devices:
             - driver: nvidia
               count: all
-              capabilities: [gpu] 
-    command: >
-      bash -c "cd /home/captain/visualnav-transformer &&
-      pip install -e diffusion_policy/ &&
-      pip install -e train/ &&
-      bash" 
+              capabilities: [gpu]
+    command: "bash"
+      # bash -c "cd /home/captain/visualnav-transformer &&
+      # pip install -e diffusion_policy/ &&
+      # pip install -e train/ &&
+      # bash" 

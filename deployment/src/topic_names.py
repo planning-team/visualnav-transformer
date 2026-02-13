@@ -6,7 +6,7 @@
 # IMAGE_TOPIC = "/usb_cam/image_raw"
 FRONT_IMAGE_TOPIC = "/camera/color/image_raw"
 REVERSE_IMAGE_TOPIC = "/camera/color/image_raw"
-IMAGE_TOPIC = "/rgb/image_raw"
+IMAGE_TOPIC = "/camera/color/image_raw"
 
 # exploration topics
 SUBGOALS_TOPIC = "/subgoals"

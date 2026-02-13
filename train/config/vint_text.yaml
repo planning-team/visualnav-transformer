@@ -37,7 +37,7 @@ late_fusion: False
 
 # SigLIP2 text encoder
 siglip_model_name: "google/siglip2-base-patch16-224"
-siglip_cache_dir: "/workspace/cache/siglip2"
+siglip_cache_dir: "cache/siglip2"
 freeze_siglip: True
 
 # ViNT checkpoint (empty = train from scratch)
