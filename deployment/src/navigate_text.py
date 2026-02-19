@@ -21,7 +21,9 @@ import time
 # ROS
 import rospy
 from sensor_msgs.msg import Image
-from std_msgs.msg import Bool, Float32MultiArray
+from std_msgs.msg import Bool, Float32MultiArray, Header, ColorRGBA
+from visualization_msgs.msg import Marker, MarkerArray
+from geometry_msgs.msg import Point, Vector3, Pose, Quaternion
 
 # Local utils
 from utils import msg_to_pil, to_numpy, transform_images, load_model
@@ -31,6 +33,8 @@ from topic_names import IMAGE_TOPIC, WAYPOINT_TOPIC
 # CONSTANTS
 ROBOT_CONFIG_PATH = "/home/captain/visualnav-transformer/deployment/config/robot.yaml"
 MODEL_CONFIG_PATH = "/home/captain/visualnav-transformer/deployment/config/models.yaml"
+WAYPOINTS_VIZ_TOPIC = "/text_nav/waypoints_viz"
+ROBOT_FRAME = "base_link"
 
 with open(ROBOT_CONFIG_PATH, "r") as f:
     robot_config = yaml.safe_load(f)
@@ -45,6 +49,83 @@ context_size: int = None
 # Device
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
+
+
+def build_waypoints_marker_array(
+    waypoints: np.ndarray,
+    chosen_idx: int,
+    stamp: rospy.Time,
+) -> MarkerArray:
+    """Build a MarkerArray for Foxglove / RViz visualisation.
+
+    Creates three markers:
+      1. LINE_STRIP  – the full predicted trajectory (semi-transparent cyan).
+      2. SPHERE_LIST – all waypoint positions (small cyan spheres).
+      3. SPHERE      – the chosen waypoint highlighted (larger red sphere).
+
+    Args:
+        waypoints: Array of shape [len_traj_pred, >=2] with (x, y, …) in the
+                   robot frame.
+        chosen_idx: Index of the waypoint that is sent to the controller.
+        stamp: ROS timestamp to use in the header.
+    """
+    marker_array = MarkerArray()
+    header = Header(stamp=stamp, frame_id=ROBOT_FRAME)
+
+    # --- 1. Trajectory line strip -------------------------------------------
+    line = Marker()
+    line.header = header
+    line.ns = "text_nav_waypoints"
+    line.id = 0
+    line.type = Marker.LINE_STRIP
+    line.action = Marker.ADD
+    line.pose = Pose(position=Point(0, 0, 0),
+                     orientation=Quaternion(0, 0, 0, 1))
+    line.scale = Vector3(0.03, 0, 0)  # line width
+    line.color = ColorRGBA(0.0, 0.9, 0.9, 0.6)  # cyan, semi-transparent
+    line.lifetime = rospy.Duration(0)  # persist until next publish
+
+    # Start from the robot origin (0, 0)
+    line.points.append(Point(0.0, 0.0, 0.0))
+    for wp in waypoints:
+        line.points.append(Point(float(wp[0]), float(wp[1]), 0.0))
+    marker_array.markers.append(line)
+
+    # --- 2. All waypoints as small spheres -----------------------------------
+    spheres = Marker()
+    spheres.header = header
+    spheres.ns = "text_nav_waypoints"
+    spheres.id = 1
+    spheres.type = Marker.SPHERE_LIST
+    spheres.action = Marker.ADD
+    spheres.pose = Pose(position=Point(0, 0, 0),
+                        orientation=Quaternion(0, 0, 0, 1))
+    spheres.scale = Vector3(0.06, 0.06, 0.06)
+    spheres.color = ColorRGBA(0.0, 0.9, 0.9, 0.9)
+
+    for wp in waypoints:
+        spheres.points.append(Point(float(wp[0]), float(wp[1]), 0.0))
+    marker_array.markers.append(spheres)
+
+    # --- 3. Chosen waypoint highlight ----------------------------------------
+    chosen = Marker()
+    chosen.header = header
+    chosen.ns = "text_nav_waypoints"
+    chosen.id = 2
+    chosen.type = Marker.SPHERE
+    chosen.action = Marker.ADD
+    chosen.pose = Pose(
+        position=Point(float(waypoints[chosen_idx][0]),
+                       float(waypoints[chosen_idx][1]),
+                       0.0),
+        orientation=Quaternion(0, 0, 0, 1),
+    )
+    chosen.scale = Vector3(0.10, 0.10, 0.10)
+    chosen.color = ColorRGBA(1.0, 0.2, 0.2, 1.0)  # red
+    chosen.lifetime = rospy.Duration(0)
+    marker_array.markers.append(chosen)
+
+    return marker_array
 
 
 def callback_obs(msg):
@@ -106,6 +187,7 @@ def main(args: argparse.Namespace):
     # Publishers
     waypoint_pub = rospy.Publisher(WAYPOINT_TOPIC, Float32MultiArray, queue_size=1)
     goal_pub = rospy.Publisher("/text_nav/goal_distance", Float32MultiArray, queue_size=1)
+    waypoints_viz_pub = rospy.Publisher(WAYPOINTS_VIZ_TOPIC, MarkerArray, queue_size=1)
 
     print("Registered with master node. Waiting for image observations...")
     print(f"Navigating toward: '{args.goal_text}'")
@@ -134,9 +216,16 @@ def main(args: argparse.Namespace):
             # Extract predictions
             dist = to_numpy(dist_pred).flatten()[0]
             waypoints = to_numpy(action_pred)[0]  # [len_traj_pred, num_action_params]
+            rospy.loginfo(f"Waypoints: {waypoints}")
 
             # Select the desired waypoint
             chosen_waypoint = waypoints[args.waypoint]
+
+            # Publish waypoints visualisation (MarkerArray for Foxglove / RViz)
+            viz_msg = build_waypoints_marker_array(
+                waypoints, args.waypoint, rospy.Time.now()
+            )
+            waypoints_viz_pub.publish(viz_msg)
 
             # Publish goal distance for monitoring
             goal_dist_msg = Float32MultiArray()
